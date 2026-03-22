@@ -5,61 +5,57 @@ const { Server } = require("socket.io");
 const app = express();
 const server = http.createServer(app);
 
-const io = new Server(server, {
-  cors: { origin: "*" }
-});
+const io = new Server(server, { cors: { origin: "*" } });
 
-// Health check endpoint for Render
 app.get("/health", (req, res) => res.json({ status: "ok" }));
-app.get("/", (req, res) => res.json({ app: "TwoGether Signaling Server", status: "running" }));
+app.get("/",       (req, res) => res.json({ app: "TwoGether Signaling Server", status: "running" }));
 
 io.on("connection", socket => {
   let currentRoom = null;
   let isHost = false;
 
-  socket.on("join-room", room => {
+  socket.on("join-room", ({ room, name }) => {
     const roomSockets = io.sockets.adapter.rooms.get(room);
-    const roomSize = roomSockets ? roomSockets.size : 0;
+    const roomSize    = roomSockets ? roomSockets.size : 0;
 
-    if (roomSize >= 2) {
-      socket.emit("room-full");
-      return;
-    }
+    if (roomSize >= 2) { socket.emit("room-full"); return; }
 
     isHost = roomSize === 0;
     currentRoom = room;
     socket.join(room);
 
-    // Tell the new joiner whether they are host
     socket.emit("role-assigned", { isHost });
-
-    // Notify existing user that someone joined
-    socket.to(room).emit("user-joined");
+    socket.to(room).emit("user-joined", { name: name || "Partner" });
 
     // WebRTC signaling
-    socket.on("offer",          data => socket.to(room).emit("offer", data));
-    socket.on("answer",         data => socket.to(room).emit("answer", data));
-    socket.on("ice-candidate",  data => socket.to(room).emit("ice-candidate", data));
+    socket.on("offer",         d => socket.to(room).emit("offer",  d));
+    socket.on("answer",        d => socket.to(room).emit("answer", d));
+    socket.on("ice-candidate", d => socket.to(room).emit("ice-candidate", d));
 
-    // Game signaling – server just relays, clients own the logic
-    socket.on("game:request",   data => socket.to(room).emit("game:request", data));
-    socket.on("game:accept",    data => socket.to(room).emit("game:accept", data));
-    socket.on("game:decline",    ()   => socket.to(room).emit("game:decline"));
-    socket.on("game:choice",    data => socket.to(room).emit("game:choice", data));
-    socket.on("game:next-turn", ()   => socket.to(room).emit("game:next-turn"));
-    socket.on("game:end",       ()   => socket.to(room).emit("game:end"));
+    // Name
+    socket.on("set-name",      d => socket.to(room).emit("partner-name", d));
 
-    // Partner status events
-    socket.on("camera-off",     () => socket.to(room).emit("partner-camera-off"));
-    socket.on("camera-on",      () => socket.to(room).emit("partner-camera-on"));
-    socket.on("muted",          () => socket.to(room).emit("partner-muted"));
-    socket.on("unmuted",        () => socket.to(room).emit("partner-unmuted"));
+    // Partner status
+    socket.on("camera-off",    () => socket.to(room).emit("partner-camera-off"));
+    socket.on("camera-on",     () => socket.to(room).emit("partner-camera-on"));
+    socket.on("muted",         () => socket.to(room).emit("partner-muted"));
+    socket.on("unmuted",       () => socket.to(room).emit("partner-unmuted"));
+
+    // Game signaling (server just relays)
+    socket.on("game:request",    d  => socket.to(room).emit("game:request",  d));
+    socket.on("game:accept",     d  => socket.to(room).emit("game:accept",   d));
+    socket.on("game:decline",    () => socket.to(room).emit("game:decline"));
+    socket.on("game:choice",     d  => socket.to(room).emit("game:choice",   d));
+    socket.on("game:next-turn",  () => socket.to(room).emit("game:next-turn"));
+    socket.on("game:end",        () => socket.to(room).emit("game:end"));
+    socket.on("game:score",      d  => socket.to(room).emit("game:score",    d));
+    socket.on("game:wyr-start",  d  => socket.to(room).emit("game:wyr-start",  d));
+    socket.on("game:wyr-choice", d  => socket.to(room).emit("game:wyr-choice", d));
+    socket.on("game:wyr-next",   d  => socket.to(room).emit("game:wyr-next",   d));
   });
 
   socket.on("disconnect", () => {
-    if (currentRoom) {
-      socket.to(currentRoom).emit("partner-disconnected");
-    }
+    if (currentRoom) socket.to(currentRoom).emit("partner-disconnected");
   });
 });
 
